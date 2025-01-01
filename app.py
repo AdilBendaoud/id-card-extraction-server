@@ -4,11 +4,20 @@ from flask import Flask, request, jsonify, send_file, render_template
 import pytesseract
 import datetime
 import re
+from flask_jwt_extended import JWTManager, jwt_required, verify_jwt_in_request
+import base64
+import os
 
 app = Flask(__name__)
 
+# Configure JWT
+raw_secret_key = base64.b64decode(os.getenv('JWT_SECRET_KEY', 'default_key_in_base64'))
+app.config['JWT_SECRET_KEY'] = raw_secret_key
+app.config['JWT_ALGORITHM'] = 'HS256'
+jwt = JWTManager(app)
+
 # Path to Tesseract OCR executable
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 # Updated standard card dimensions (for normalization)
 STANDARD_WIDTH = 515
@@ -24,11 +33,20 @@ REGIONS = {
     "card_id": (61 / 515, 282 / 321, 149 / 515, 315 / 321)
 }
 
-@app.route('/')
+@app.before_request
+def verify_jwt():
+    if request.endpoint and not app.view_functions[request.endpoint].__name__ == 'static':  # Ignore static files
+        try:
+            verify_jwt_in_request()
+        except Exception as e:
+            return jsonify({'error': 'Invalid or missing JWT token', 'details': str(e)}), 401
+
+@app.route('/api/id-scan')
 def home():
     return render_template('index.html')
 
-@app.route('/process-image', methods=['POST'])
+@app.route('/api/id-scan/process-image', methods=['POST'])
+@jwt_required()
 def process_image():
     if 'file' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
